@@ -6,7 +6,6 @@ public class Cash extends Asset{
         if (amount > 0){
             this.cash_amount = amount;
         }
-
     }
 
     public double get_Asset_Value(String current_date){
