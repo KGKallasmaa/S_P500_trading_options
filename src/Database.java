@@ -7,9 +7,11 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static java.lang.Math.abs;
 import static java.lang.Math.sqrt;
 
 
+@SuppressWarnings("Duplicates")
 public class Database {
 
     private HashMap<String,Double> high_data; //(date,value) RSI
@@ -305,7 +307,7 @@ public class Database {
         try {
             date1 = sdf.parse(start_date);
             date2 = sdf.parse(end_date);
-            return Math.abs(date2.getTime() - date1.getTime()) / (86400000);
+            return abs(date2.getTime() - date1.getTime()) / (86400000);
         } catch (ParseException e) {
             System.out.println("Signing date and exercise date are not properly formatted.");
         }
@@ -491,7 +493,7 @@ public class Database {
 
 
     public void case1_signal(String message) {
-        try(FileWriter fw = new FileWriter("/Users/Gustav/Documents/GitHub/Thesis(final)/src/Results/case1_signals", true);
+        try(FileWriter fw = new FileWriter("/Users/Gustav/IdeaProjects/S_P500_trading_optionss/src/Data/case1_signals", true);
             BufferedWriter bw = new BufferedWriter(fw);
             PrintWriter out = new PrintWriter(bw))
         {
@@ -501,7 +503,7 @@ public class Database {
         }
     }
     public void case2_signal(String message) {
-        try(FileWriter fw = new FileWriter("//Users/Gustav/Documents/GitHub/Thesis(final)/src/Results/case2_signals", true);
+        try(FileWriter fw = new FileWriter("/Users/Gustav/IdeaProjects/S_P500_trading_optionss/src/Data/case2_signals", true);
             BufferedWriter bw = new BufferedWriter(fw);
             PrintWriter out = new PrintWriter(bw))
         {

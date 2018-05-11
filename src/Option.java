@@ -162,11 +162,9 @@ public class Option extends Asset {
                     return database.get_stock_value(current_date,"Open");
                 }
                 return 0;
-
         }
-        System.out.printf("Error calculating options excersise expense");
+        System.out.println("Error calculating options excersise expense");
         return 0;
-
     }
 
     @Override
@@ -188,7 +186,6 @@ public class Option extends Asset {
 
         DecimalFormat df = new DecimalFormat("#.0000");
 
-
         switch (this.type) {
             case "Call":
                 //Rounding value to 3 decimal places
@@ -199,7 +196,6 @@ public class Option extends Asset {
             default:
                 System.out.println("Error calculation option premium");
                 return 0;
-
         }
 
     }

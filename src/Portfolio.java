@@ -4,6 +4,9 @@ import java.io.PrintWriter;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -14,6 +17,7 @@ public class Portfolio {
     private List<Asset> port; //portfolio
     private Database database;
     private Queue<Stock> stock_obligation; // todo: it should be a priority que
+    private HashMap<String,List<Cash>> cash_obligation;
     private Queue<Order> order_log;
     Portfolio(int money, Database db){
         this.port = new ArrayList<>();
@@ -25,13 +29,26 @@ public class Portfolio {
         this.database = db;
         this.stock_obligation = new LinkedList<>();
         this.order_log = new LinkedList<>();
+        this.cash_obligation = new HashMap<>();
     }
 
 
     public synchronized BigDecimal market_value(String current_date){
         BigDecimal total_market_value = new BigDecimal(port.parallelStream().mapToDouble(p->p.get_Asset_Value(current_date)).sum(), MathContext.DECIMAL64);
         BigDecimal stock_obligation_exposure = new BigDecimal(stock_obligation.parallelStream().mapToDouble(p->p.get_Asset_Value(current_date)).sum(), MathContext.DECIMAL64);
-        return total_market_value.subtract(stock_obligation_exposure);
+        double cash_obligation = 0;
+
+
+        //todo: implement lamda
+        for (String date : getCash_obligation().keySet()){
+            for (Cash cash : getCash_obligation().get(date)){
+                cash_obligation += cash.get_Asset_Value(current_date);
+            }
+        }
+
+
+
+        return total_market_value.subtract(stock_obligation_exposure).subtract(new BigDecimal(cash_obligation));
     }
 
     public synchronized BigDecimal value_without_options(String current_date){
@@ -93,42 +110,58 @@ public class Portfolio {
         return stocks;
     }
     public Database getDatabase() {return database;}
-    public synchronized boolean add_stock_obligation(String obligation_date, String obligation_type, Stock stock){
+    public synchronized void add_stock_obligation(String obligation_date, String obligation_type, Stock stock){
         stock.setObligation(obligation_date,obligation_type);
         stock_obligation.add(stock);
-        return true;
     }
 
+    public synchronized HashMap<String, List<Cash>> getCash_obligation() {
+        return cash_obligation;
+    }
 
-    public synchronized boolean buy_stock(String order_id,String name,int quantity, double price,String current_date,String type){
+    public synchronized double buy_stock(String order_id, String name, int quantity, double price, String current_date, String type, boolean implement_trading_fee){
         //type: used for order logging
         List<String> order_ids = order_log.stream().map(Order::getOrderID).collect(Collectors.toList());
 
         double money_to_be_taken = (quantity > 0 && price > 0) ? (quantity*price) : 0;
-        if (money_to_be_taken == 0){ System.out.println("Error(buy stock): quantity or price negative"); return false;}
+        if (money_to_be_taken == 0){ System.out.println("Error(buy stock): quantity or price negative"); return 0;}
 
-        if (money_to_be_taken < get_cash_available(current_date)){
+        double trading_fee = (implement_trading_fee) ? stock_trading_fee(quantity,price) : 0;
+
+        if (money_to_be_taken + trading_fee < get_cash_available(current_date)){
+            money_to_be_taken = money_to_be_taken+ trading_fee;
+
             add_money(-money_to_be_taken,current_date);
             Stock stock = new Stock(order_id,name,database,quantity);
             add_asset(stock);
 
-            if (type.equals("Initial") && order_ids.contains(order_id)){change_order_profit(order_id,"Stock",-money_to_be_taken);}
-            else if (type.equals("Regular")){change_order_profit(order_id,"Stock",-money_to_be_taken);}
+            if (type.equals("Initial") && order_ids.contains(order_id))
+            {
+                change_order_profit(order_id,"Stock",-money_to_be_taken);
+            }
+            else if (type.equals("Regular"))
+            {
+                change_order_profit(order_id,"Stock",-money_to_be_taken);
+            }
 
-            return true;
+            return trading_fee;
         }
-        System.out.println("Not enough capital to buy stock (money needed = "+money_to_be_taken+" money at hand"+get_cash_available(current_date));
-        return false;
+
+
+        System.out.println("Not enough capital to buy stock (money needed = "+(money_to_be_taken+trading_fee)+" money at hand"+get_cash_available(current_date));
+        return trading_fee;
     }
-    public synchronized boolean sell_stock(String order_id,String name,int quantity, double price,String current_date,String type){
+    public synchronized double sell_stock(String order_id,String name,int quantity, double price,String current_date,String type,boolean implement_trading_fee){
         //type: used for order logging
         double money_to_be_added = (quantity > 0 && price > 0) ? (quantity*price) : 0;
 
 
         if (money_to_be_added == 0){
             System.out.println("Error(selling stock): quantity or price negative");
-            return false;
+            return 0;
         }
+        double trading_fee = (implement_trading_fee) ? stock_trading_fee(quantity,price) : 0;
+        money_to_be_added = money_to_be_added- trading_fee;
 
         add_money(money_to_be_added,current_date);
         Stock stock = new Stock(order_id,name,database,-quantity);
@@ -144,48 +177,58 @@ public class Portfolio {
             change_order_profit(order_id,"Stock",money_to_be_added);
         }
 
-        return true;
+        return trading_fee;
     }
 
-    public synchronized boolean buy_option(String order_id,String type,double strike_price,String signing_date,String exercise_date,double volatility,int number_of_stocks){
+    public synchronized double buy_option(String order_id,String type,double strike_price,String signing_date,String exercise_date,double volatility,int number_of_stocks, boolean implement_trading_fee){
         double market_price = database.get_stock_value(signing_date,"Open");
         Option option = new Option(order_id,database,type,"Buy",strike_price,signing_date,exercise_date,volatility,market_price,number_of_stocks);
 
+        double trading_fee = (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BS(),"Buy",option.get_Strike()) : 0; //todo: always buying one option at a time
+
+
         //Do I have enough money to play the premium?
-        if (get_cash_available(signing_date) >= option.option_premium_BS()*option.get_number_of_Stocks()){
-            add_money(-option.option_premium_BS()*option.get_number_of_Stocks(),signing_date);
+        if (get_cash_available(signing_date) + trading_fee >= option.option_premium_BS()*option.get_number_of_Stocks()){
+            double income = -1*(option.option_premium_BS()*number_of_stocks+trading_fee);
+            add_money(income,signing_date);
+
             add_asset(option);
-            return true;
+            return trading_fee;
         }
         System.out.println("Error: not enough money for option premium payment. Money needed ("+(option.option_premium_BS()*option.get_number_of_Stocks())+") is bigger than the sum we have ("+get_cash_available(signing_date)+") ");
-        return false;
+        return 0;
 
     }
-    public synchronized void sell_option(String order_id,String type,double strike_price,String signing_date,String exercise_date,double volatility,int number_of_stocks){
+    public synchronized double sell_option(String order_id,String type,double strike_price,String signing_date,String exercise_date,double volatility,int number_of_stocks,boolean implement_trading_fee){
         double market_price = database.get_stock_value(signing_date,"Open");
         Option option = new Option(order_id,database,type,"Sell",strike_price,signing_date,exercise_date,volatility,market_price,number_of_stocks);
-        add_money(option.option_premium_BS()*option.get_number_of_Stocks(),signing_date);
+
+        double trading_fee = (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BS(),"Sell",option.get_Strike()) : 0; //todo: always buying one option at a time
+        double income = option.option_premium_BS()*option.get_number_of_Stocks()-trading_fee;
+
+        add_money(income,signing_date);
+
         add_asset(option);
+        return trading_fee;
 
     }
-    private void exercise_option(Option option, String today) {
+    private void exercise_option(Option option, String today,boolean implement_trading_fee) {
 
 
         double current_market_price = database.get_stock_value(today, "Open");
-        double income = 0, expense = 0;
+        double income = 0, expense = 0, trading_fee = 0;
 
         //1. I have to exercise this option
         boolean i_must_exercise_this_option = option.get_Action().equals("Sell") && option.get_Asset_Value(today) >0;
         if (i_must_exercise_this_option) {
             //Call option
-            if (option.get_Type().equals("Call")) {
-                expense = option.get_Strike() * option.get_number_of_Stocks();
-                income = current_market_price * option.get_number_of_Stocks();
-            }
+            expense = option.get_Strike() * option.get_number_of_Stocks();
+            income = current_market_price * option.get_number_of_Stocks();
+
             //Put option
-            else {
-                income = option.get_Strike() * option.get_number_of_Stocks();
-                expense = current_market_price * option.get_number_of_Stocks();
+            if (option.get_Type().equals("Put")) {
+                income = -income;
+                expense = -expense;
             }
             }
         //2. I want to exercise this option
@@ -193,21 +236,22 @@ public class Portfolio {
 
         if (i_want_exercise_this_option) {
             //Call option
-            if (option.get_Type().equals("Call")) {
-                expense = option.get_Strike() * option.get_number_of_Stocks();
-                income = current_market_price * option.get_number_of_Stocks();
-            }
+            expense = option.get_Strike() * option.get_number_of_Stocks();
+            income = current_market_price * option.get_number_of_Stocks();
+
             //Put option
-            else {
-                income = option.get_Strike() * option.get_number_of_Stocks();
-                expense = current_market_price * option.get_number_of_Stocks();
-                }
+            if (option.get_Type().equals("Put")) {
+                income = -income;
+                expense = -expense;
+            }
         }
-        double net_income = income-expense;
+        trading_fee += (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BS(),"Buy",option.get_Strike()) : 0;
+        trading_fee += (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BS(),"Sell",current_market_price) : 0;
+
+
+        double net_income = income-expense-trading_fee;
         if (net_income != 0){
             change_order_profit(option.getOrder_id(),"Option",net_income);
-
-
             add_money(net_income, today);
         }
 
@@ -241,14 +285,15 @@ public class Portfolio {
     }
 
 
-    public synchronized void exercise_obligations(String current_date){
+    public synchronized void exercise_obligations(String current_date,boolean implement_trading_fee){
         //1. Option obligation
         List<Asset> options_that_can_be_exercised = getOptions().parallelStream().filter(o-> o.can_be_exercised_today(current_date)).collect(toList());
 
 
-        double interest_payment = (!options_that_can_be_exercised.isEmpty()) ? interest_payment(current_date,options_that_can_be_exercised) : 0;
+        String end_date = LocalDate.parse(current_date).plusDays(90).toString(); //todo: implement general solution
+        double interest_payment = (!options_that_can_be_exercised.isEmpty()) ? interest_payment(current_date,end_date,options_that_can_be_exercised,"Regular") : 0;
 
-        options_that_can_be_exercised.forEach(o->exercise_option((Option)o,current_date));
+        options_that_can_be_exercised.forEach(o->exercise_option((Option)o,current_date,implement_trading_fee));
         port.removeAll(options_that_can_be_exercised);
 
 
@@ -264,10 +309,23 @@ public class Portfolio {
         List<Stock> stocks_that_will_be_exercised_today = stock_obligation.parallelStream().filter(p->p.getObligation_date().equals(current_date)).collect(toList());
         List<Stock> stocks_that_will_be_sold_today = stocks_that_will_be_exercised_today.stream().filter(p->p.getObligation_type().equals("Sell")).collect(toList());
         List<Stock> stocks_that_will_be_bought_today = stocks_that_will_be_exercised_today.stream().filter(p->p.getObligation_type().equals("Buy")).collect(toList());
-        stocks_that_will_be_sold_today.forEach(stock->sell_stock(stock.getOrder_id(),stock.get_Name(),stock.get_Quantity(),database.get_stock_value(current_date,"Open"),current_date,"Regular"));
-        stocks_that_will_be_bought_today.forEach(stock->buy_stock(stock.getOrder_id(),stock.get_Name(),stock.get_Quantity(),database.get_stock_value(current_date,"Open"),current_date,"Regular"));
+        stocks_that_will_be_sold_today.forEach(stock->sell_stock(stock.getOrder_id(),stock.get_Name(),stock.get_Quantity(),database.get_stock_value(current_date,"Open"),current_date,"Regular",implement_trading_fee));
+        stocks_that_will_be_bought_today.forEach(stock->buy_stock(stock.getOrder_id(),stock.get_Name(),stock.get_Quantity(),database.get_stock_value(current_date,"Open"),current_date,"Regular",implement_trading_fee));
         //removing all obligations
         stock_obligation.removeAll(stocks_that_will_be_exercised_today);
+
+
+        //3. Short selling intress payment
+        if (cash_obligation.keySet().contains(current_date)){
+            List<Cash> intress_obligations = cash_obligation.get(current_date);
+
+            intress_obligations.forEach(payment-> {
+                add_money(-payment.get_Asset_Value(current_date),current_date);
+                change_order_profit(payment.getOblication_id(),"Stock",-payment.get_Asset_Value(current_date));
+                });
+            cash_obligation.remove(current_date);
+
+        }
 
 
     }
@@ -387,12 +445,94 @@ public class Portfolio {
 
     }
 
-    private double interest_payment(String current_date, List<Asset> options){
-        double exercise_expense = options.stream().mapToDouble(o->o.exercise_value(current_date)).sum();
+    public double interest_payment(String current_date, String end_date, List<Asset> options, String type){
+        /*
+        Type:
+        2. Short-> used for short selling
+        1. Regular -> used for in the money options
+         */
+        double time_difference;
 
-        double loan_amount = Math.min(get_cash_available(current_date)-exercise_expense,0);
-        double interest_rate = database.get_treasury_value(current_date)/100.0; //annual
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        Date date1,date2;
 
-        return (loan_amount < 0) ? ((Math.abs(loan_amount) * Math.pow(1 + interest_rate/ 365, 3)) - Math.abs(loan_amount)) : 0;
+        try {
+            date1 = sdf.parse(current_date);
+            date2 = sdf.parse(end_date);
+            time_difference = Math.abs(date2.getTime()-date1.getTime())/(86400000);
+            double exercise_expense = options.stream().mapToDouble(o->o.exercise_value(current_date)).sum();
+
+            double loan_amount =  (type.equals("Regular")) ? Math.min(get_cash_available(current_date)-exercise_expense,0) : database.get_stock_value(current_date,"Open")*100;
+            double interest_rate = database.get_treasury_value(current_date)/100.0; //annual
+
+            double m = 360/time_difference;
+            double var1 = 1/(interest_rate/m);
+            double var2 = 1 - (1 / Math.pow(1 + interest_rate / m,m*time_difference/360));
+
+            double annuity_payment = loan_amount / (var1*var2);
+
+            return annuity_payment-loan_amount;
+
+
+
+        } catch (ParseException e) {
+            System.out.println("Error: Error calculating intrest payment. Current date and end date are not propery formated.");
+            return 0;
+        }
+
+    }
+
+
+
+    //Fees and oblications
+
+    private double stock_trading_fee(int quantity,double price){
+        //Using Interactive brokers fee structure: https://www.interactivebrokers.com/en/index.php?f=1590&p=stocks1
+
+        if (quantity < 0){
+            System.out.println("Error: Error calculation stock trading free. Quantity must be bigger than 0");
+            return 0;
+        }
+        if (price < 0){
+            System.out.println("Error: Error calculation stock trading free. Price must be bigger than 0");
+            return 0;
+        }
+        double normal_fee = quantity*0.005;
+        double min_fee = 1;
+        double max_fee = price*quantity*1/100;
+
+
+        return Math.min(Math.max(normal_fee,min_fee),max_fee);
+    }
+    private double option_trading_fee(int number_of_contacts,double premium_payment,String action,double strike){
+        //Using Interactive brokers fee structure: https://www.interactivebrokers.com/en/index.php?f=commission&p=options1
+        if (number_of_contacts < 0){
+            System.out.println("Error: Error calculation option trading fee. number of option contracts can not be negative.");
+            return 0;
+        }
+        //1. premium fee
+        double premium_fee = (premium_payment >= 0.1) ? Math.max(number_of_contacts*0.7,1) : (premium_payment < 0.05) ? Math.max(number_of_contacts*0.25,1) : Math.max(number_of_contacts*0.5,1);
+        // 2. NYSE fee
+        double exchange_fee = (action.equals("Buy")) ? 1.1 : 0.5;
+        //3. Regulatory Fee
+        double regulatory_fee = 0;
+        //4. Transaction fee
+        double transaction_fee = (action.equals("Sell")) ? 0.0000231*number_of_contacts*strike + 0.002*number_of_contacts*100 : 0+ 0.002*number_of_contacts*100;
+        //5. OCC Clearing fees
+        double occ_fee = (number_of_contacts > 1100) ? 55 : 0.05*number_of_contacts;
+        // Return the fee
+        return premium_fee+exchange_fee+regulatory_fee+transaction_fee+occ_fee;
+    }
+    public void add_interest_obligation(String order_id, String obligation_date, double amount) {
+        Cash cash = new Cash(amount);
+        cash.setOblication_id(order_id);
+        List<Cash> all_obligations_on_the_date = new ArrayList<>();
+        all_obligations_on_the_date.add(cash);
+        if (cash_obligation.containsKey(obligation_date)){
+            List<Cash> previously_added_obligation_on_the_date = cash_obligation.get(obligation_date);
+            all_obligations_on_the_date.addAll(previously_added_obligation_on_the_date);
+        }
+        cash_obligation.put(obligation_date,all_obligations_on_the_date);
+
     }
 }

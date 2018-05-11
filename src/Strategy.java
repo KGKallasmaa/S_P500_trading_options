@@ -1,6 +1,8 @@
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -9,21 +11,24 @@ public class Strategy {
 
     private Portfolio portfolio;
     private Database database;
-    Strategy(Portfolio p,Database db){
+    private boolean use_trading_fees;
+
+    Strategy(Portfolio p,Database db,boolean trading_fees){
         this.portfolio = p;
         this.database = db;
+        this.use_trading_fees = trading_fees;
     }
     //Helper function
     public void setPortfolio(Portfolio p){
         this.portfolio = p;
     }
 
-
+    public boolean isUse_trading_fees() {return use_trading_fees;}
     //Different strategies
 
     //1. RSI
     //TODO fix reporting
-    private synchronized Portfolio trade_RSI(String current_date) {
+    private synchronized void trade_RSI(String current_date) {
         int time_period = 14; //days
         double current_price = database.get_stock_value(current_date,"Open");
 
@@ -54,11 +59,15 @@ public class Strategy {
                     Option option = new Option(order_id_2,database,"Call","Buy",current_price,current_date,obligation_date,volatility,current_price,100);
 
 
+                    List<Double> stock_fee_list = new ArrayList<>();
+                    List<Double> option_fee_list = new ArrayList<>();
+
+
                     IntStream.range(0, number_of_sets).forEach($ ->
                     {
-                        this.portfolio.buy_stock(order_id_1, "SPY", 100, current_price, current_date,"Initial"); //TODO: add it back later
-                        this.portfolio.add_stock_obligation(obligation_date, "Sell", stock); //TODO: add it back later
-                        this.portfolio.buy_option(order_id_2,"Call",current_price, current_date, obligation_date, volatility, 100);
+                        stock_fee_list.add(this.portfolio.buy_stock(order_id_1, "SPY", 100, current_price, current_date,"Initial",use_trading_fees));
+                        this.portfolio.add_stock_obligation(obligation_date, "Sell", stock);
+                        option_fee_list.add(this.portfolio.buy_option(order_id_2,"Call",current_price, current_date, obligation_date, volatility, 100,use_trading_fees));
                     });
 
                     int number_of_stocks_after = portfolio.getStocks().get(0).get_Quantity();
@@ -67,11 +76,14 @@ public class Strategy {
                     Double number_of_actual_stock_sets = Math.abs((number_of_stocks_after)-(number_of_stocks_before))/100.0;
                     int number_of_actual_option_sets = (number_of_options_after-number_of_options_before);
 
+                    double stock_fee = stock_fee_list.stream().mapToDouble(p->p).sum();
+                    double option_fee = option_fee_list.stream().mapToDouble(p->p).sum();
+
 
                     //Reporter
-                    Order order1 = new Order(order_id_1,current_date,"Stock","Buy","RSI","Buy 100 shares",number_of_actual_stock_sets.intValue(),-current_price*100*number_of_actual_stock_sets);
+                    Order order1 = new Order(order_id_1,current_date,"Stock","Buy","RSI","Buy 100 shares",number_of_actual_stock_sets.intValue(),-current_price*100*number_of_actual_stock_sets-stock_fee);
                     //later we'll subtract the market price from order1
-                    Order order2 = new Order(order_id_2,current_date,"Option","Buy","RSI","Buy 1 call option",number_of_actual_option_sets,-option.option_premium_BS()*number_of_actual_option_sets*100);
+                    Order order2 = new Order(order_id_2,current_date,"Option","Buy","RSI","Buy 1 call option",number_of_actual_option_sets,-option.option_premium_BS()*number_of_actual_option_sets*100-option_fee);
 
 
                     portfolio.add_order(order1);
@@ -110,11 +122,15 @@ public class Strategy {
                     Option option = new Option(order_id_2, database, "Put", "Sell", current_price, current_date, obligation_date, volatility, current_price, 100);
 
 
+                    List<Double> stock_fee_list = new ArrayList<>();
+                    List<Double> option_fee_list = new ArrayList<>();
+
+
                     IntStream.range(0, number_of_sets).forEach($ ->
                     {
-                        this.portfolio.sell_stock(order_id_1, "SPY", 100, current_price, current_date,"Initial"); //TODO: add it back later
-                        this.portfolio.add_stock_obligation(obligation_date, "Buy", stock); //TODO: add it back later
-                        this.portfolio.sell_option(order_id_2, "Put", current_price, current_date, obligation_date, volatility, 100);
+                        stock_fee_list.add(this.portfolio.sell_stock(order_id_1, "SPY", 100, current_price, current_date,"Initial",use_trading_fees));
+                        this.portfolio.add_stock_obligation(obligation_date, "Buy", stock);
+                        option_fee_list.add(this.portfolio.sell_option(order_id_2, "Put", current_price, current_date, obligation_date, volatility, 100,use_trading_fees));
                     });
 
 
@@ -123,81 +139,79 @@ public class Strategy {
                     Double number_of_actual_stock_sets = Math.abs((number_of_stocks_after)-(number_of_stocks_before))/100.0;
                     int number_of_actual_option_sets = (number_of_options_after-number_of_options_before);
 
+                    double stock_fee = stock_fee_list.stream().mapToDouble(p->p).sum();
+                    double option_fee = option_fee_list.stream().mapToDouble(p->p).sum();
+
+
+                    List<Asset> usless_asset_list = new ArrayList<>();
+                    double short_sell_interest_payment = portfolio.interest_payment(current_date,obligation_date,usless_asset_list,"Short");
+
+                    IntStream.range(0,number_of_actual_stock_sets.intValue()).forEach($ -> this.portfolio.add_interest_obligation(order_id_1,obligation_date,short_sell_interest_payment));
+
+
                     //Reporter
-                    Order order1 = new Order(order_id_1, current_date, "Stock", "Sell", "RSI", "Sell 100 shares", number_of_actual_stock_sets.intValue(), 100 * current_price * number_of_actual_stock_sets);
+                    Order order1 = new Order(order_id_1, current_date, "Stock", "Sell", "RSI", "Sell 100 shares", number_of_actual_stock_sets.intValue(), 100 * current_price * number_of_actual_stock_sets-stock_fee);
                     //later we'll subtract the market price from order1
-                    Order order2 = new Order(order_id_2, current_date, "Option", "Sell", "RSI", "Sell 1 put option", number_of_actual_option_sets, +option.option_premium_BS() * number_of_actual_option_sets*100);
+                    Order order2 = new Order(order_id_2, current_date, "Option", "Sell", "RSI", "Sell 1 put option", number_of_actual_option_sets, +option.option_premium_BS() * number_of_actual_option_sets*100-option_fee);
 
                     portfolio.add_order(order1);
                     portfolio.add_order(order2);
 
                     //Statistics
-                    //TODO fix
                     database.case2_signal(current_date + ": RSI");
                 }
             }
         }
-        return portfolio;
     }
 
 
     //2. Simple moving average:
     //TODO fix reporting
     private synchronized Portfolio trade_simple_moving_average(String current_date) {
+        //Base information
         double current_price = database.get_stock_value(current_date,"Open");
-
         String start_date_50 = LocalDate.parse(current_date).plusDays(-50).toString();
         String start_date_200 = LocalDate.parse(current_date).plusDays(-200).toString();
         String yesterday = LocalDate.parse(current_date).plusDays(-1).toString();
-
         double moving_average_50 = database.average_value(start_date_50,current_date,"simple_moving_average");
         double moving_average_200 = database.average_value(start_date_200,current_date,"simple_moving_average");
-
 
         //RULE 1: is the current 50_day_moving average bigger than 200_day moving_average
         if (moving_average_50 >= moving_average_200){
             //Reporting
             String order_id_1 = UUID.randomUUID().toString();
-
             start_date_50 = LocalDate.parse(yesterday).plusDays(-50).toString();
             start_date_200 = LocalDate.parse(yesterday).plusDays(-200).toString();
             double moving_50_yesterday = database.average_value(start_date_50,yesterday,"simple_moving_average");
             double moving_200_yesterday = database.average_value(start_date_200,yesterday,"simple_moving_average");
 
-            //RULE 2: Was it true at timestamp (t-1)
+            //RULE 2: Was Rule1 not true yesterday?
             if (moving_50_yesterday <= moving_200_yesterday) {
-
-
                 // 1 set = buy 3 call
                 int number_of_sets = quantity_manager(current_date, "Moving Average", "50 >= 200", order_id_1);
-
                 if (number_of_sets > 0) {
-
+                    //General information
                     int number_of_days = database.suitable_days(current_date, 90);
                     String obligation_date = LocalDate.parse(current_date).plusDays(number_of_days).toString();
                     double volatility = database.past_x_days_volatility_annualised(number_of_days, current_date, "Stock");
-
-
+                    List<Double> option_fee_list = new ArrayList<>();
                     //Reporting
                     int number_of_options_before = portfolio.getOptions().size();
                     Option option = new Option(order_id_1, database, "Call", "Buy", current_price, current_date, obligation_date, volatility, current_price, 100);
-
-
+                    //Order options
                     IntStream.range(0, number_of_sets).forEach($ ->
                     {
-                        this.portfolio.buy_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100);
-                        this.portfolio.buy_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100);
-                        this.portfolio.buy_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100);
+                        option_fee_list.add(this.portfolio.buy_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100,use_trading_fees));
+                        option_fee_list.add(this.portfolio.buy_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100,use_trading_fees));
+                        option_fee_list.add(this.portfolio.buy_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100,use_trading_fees));
                     });
-
-
+                    //Order analysis
+                    double option_fee = option_fee_list.stream().mapToDouble(p->p).sum();
                     int number_of_options_after = portfolio.getOptions().size();
                     int number_of_actual_option_sets = (number_of_options_after - number_of_options_before);
-
                     //Reporter
-                    Order order1 = new Order(order_id_1, current_date, "Option", "Buy", "MAVG", "Buy 3 call options", number_of_actual_option_sets, - option.option_premium_BS() * number_of_actual_option_sets*100);
+                    Order order1 = new Order(order_id_1, current_date, "Option", "Buy", "MAVG", "Buy 3 call options", number_of_actual_option_sets, - option.option_premium_BS() * number_of_actual_option_sets*100-option_fee);
                     portfolio.add_order(order1);
-
                     //Statistics
                     database.case1_signal(current_date + ": Moving_avg");
                 }
@@ -227,18 +241,22 @@ public class Strategy {
                     Option option = new Option(order_id_1, database, "Call", "Sell", current_price, current_date, obligation_date, volatility, current_price, 100);
 
 
+                    List<Double> option_fee_list = new ArrayList<>();
+
 
                     IntStream.range(0, number_of_sets).forEach($ ->
                     {
-                        this.portfolio.sell_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100);
-                        this.portfolio.sell_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100);
+                        option_fee_list.add(this.portfolio.sell_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100,use_trading_fees));
+                        option_fee_list.add(this.portfolio.sell_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100,use_trading_fees));
                     });
 
                     int number_of_options_after = portfolio.getOptions().size();
                     int number_of_actual_option_sets = (number_of_options_after - number_of_options_before);
 
+                    double option_fee = option_fee_list.stream().mapToDouble(p->p).sum();
+
                     //Reporter
-                    Order order1 = new Order(order_id_1, current_date, "Option", "Sell", "MAVG", "Sell 2 call options", number_of_actual_option_sets,  option.option_premium_BS() * number_of_actual_option_sets*100);
+                    Order order1 = new Order(order_id_1, current_date, "Option", "Sell", "MAVG", "Sell 2 call options", number_of_actual_option_sets,  option.option_premium_BS() * number_of_actual_option_sets*100-option_fee);
 
 
                     portfolio.add_order(order1);
@@ -285,14 +303,18 @@ public class Strategy {
                     int number_of_options_before = portfolio.getOptions().size();
                     Option option = new Option(order_id_1, database, "Put", "Sell", current_price, current_date, obligation_date, volatility, current_price, 100);
 
+                    List<Double> option_fee_list = new ArrayList<>();
 
-                    IntStream.range(0, number_of_sets).forEach((int $) -> this.portfolio.sell_option(order_id_1, "Put", current_price, current_date, obligation_date, volatility, 100));
+
+                    IntStream.range(0, number_of_sets).forEach((int $) -> option_fee_list.add(this.portfolio.sell_option(order_id_1, "Put", current_price, current_date, obligation_date, volatility, 100,use_trading_fees)));
 
                     int number_of_options_after = portfolio.getOptions().size();
                     int number_of_actual_option_sets = (number_of_options_after - number_of_options_before);
 
+                    double option_fee = option_fee_list.stream().mapToDouble(p->p).sum();
+
                     //Reporter
-                    Order order1 = new Order(order_id_1, current_date, "Option", "Sell", "PE", "Sell 1 put option", number_of_actual_option_sets, option.option_premium_BS() * number_of_actual_option_sets*100);
+                    Order order1 = new Order(order_id_1, current_date, "Option", "Sell", "PE", "Sell 1 put option", number_of_actual_option_sets, option.option_premium_BS() * number_of_actual_option_sets*100-option_fee);
                     portfolio.add_order(order1);
 
 
@@ -324,13 +346,18 @@ public class Strategy {
                     int number_of_options_before = portfolio.getOptions().size();
                     Option option = new Option(order_id_1, database, "Call", "Buy", current_price, current_date, obligation_date, volatility, current_price, 100);
 
-                    IntStream.range(0, number_of_sets).forEach($ -> this.portfolio.buy_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100));
+
+                    List<Double> option_fee_list = new ArrayList<>();
+
+                    IntStream.range(0, number_of_sets).forEach($ -> option_fee_list.add(this.portfolio.buy_option(order_id_1, "Call", current_price, current_date, obligation_date, volatility, 100,use_trading_fees)));
 
                     int number_of_options_after = portfolio.getOptions().size();
                     int number_of_actual_option_sets = (number_of_options_after - number_of_options_before);
 
+                    double option_fee = option_fee_list.stream().mapToDouble(p->p).sum();
+
                     //Reporter
-                    Order order1 = new Order(order_id_1, current_date, "Option", "Sell", "PE", "Buy 1 call option", number_of_actual_option_sets, -option.option_premium_BS() * number_of_actual_option_sets*100);
+                    Order order1 = new Order(order_id_1, current_date, "Option", "Sell", "PE", "Buy 1 call option", number_of_actual_option_sets, -option.option_premium_BS() * number_of_actual_option_sets*100-option_fee);
                     portfolio.add_order(order1);
 
                     //Statistics
@@ -375,18 +402,22 @@ public class Strategy {
                 Option put_option = new Option(order_id_1, database, "Put", "Sell", market_price, current_date, obligation_date, volatility, market_price, 100);
                 Option call_option = new Option(order_id_1, database, "Call", "Buy", market_price, current_date, obligation_date, volatility, market_price, 100);
 
-                IntStream.range(0, number_of_sets).parallel().forEach($ -> {
-                    this.portfolio.sell_option(order_id_1, "Put", market_price, current_date, obligation_date, volatility, 100);
-                    this.portfolio.buy_option(order_id_1, "Call", market_price, current_date, obligation_date, volatility, 100);
 
+                List<Double> option_fee_list = new ArrayList<>();
+
+                IntStream.range(0, number_of_sets).parallel().forEach($ -> {
+                    option_fee_list.add(this.portfolio.sell_option(order_id_1, "Put", market_price, current_date, obligation_date, volatility, 100,use_trading_fees));
+                    option_fee_list.add(this.portfolio.buy_option(order_id_1, "Call", market_price, current_date, obligation_date, volatility, 100,use_trading_fees));
                 });
 
                 int number_of_options_after = portfolio.getOptions().size();
                 int number_of_actual_option_sets = (number_of_options_after - number_of_options_before);
 
+                double option_fee = option_fee_list.stream().mapToDouble(p->p).sum();
+
                 //Reporter
-                Order order1 = new Order(order_id_1, current_date, "Option", "Buy", "Unemployment", "Buy 1 call option", number_of_actual_option_sets / 2, -100*call_option.option_premium_BS() * number_of_actual_option_sets/2.0);
-                Order order2 = new Order(order_id_2, current_date, "Option", "Sell", "Unemployment", "Sell 1 put option", number_of_actual_option_sets / 2,100*put_option.option_premium_BS() * number_of_actual_option_sets/2.0);
+                Order order1 = new Order(order_id_1, current_date, "Option", "Buy", "Unemployment", "Buy 1 call option", number_of_actual_option_sets / 2, -100*call_option.option_premium_BS() * number_of_actual_option_sets/2.0-option_fee/2.0);
+                Order order2 = new Order(order_id_2, current_date, "Option", "Sell", "Unemployment", "Sell 1 put option", number_of_actual_option_sets / 2,100*put_option.option_premium_BS() * number_of_actual_option_sets/2.0-option_fee/2.0);
                 portfolio.add_order(order1);
                 portfolio.add_order(order2);
 
@@ -399,12 +430,12 @@ public class Strategy {
 
 
     public Portfolio trade_all(String current_date){
-        trade_Unemployment(current_date); // todo: profitable (1.1236)  time = 4 minutes
-        trade_PE(current_date); // todo: profitable (1.4529) time =  4 minutes
-        trade_simple_moving_average(current_date); // //todo: not profitable (16.2368) time = 0 minutes
-        trade_RSI(current_date); // todo: profitable (1388.3955) time =   1 minute
+        trade_Unemployment(current_date); // todo: profitable (1.113814)  time = 5 minutes
+        trade_PE(current_date); // todo: profitable (1.444446223) time =  5 minutes
+        trade_simple_moving_average(current_date); // //todo: profitable (16.2895996800) time = 0 minutes
+        trade_RSI(current_date); // todo: profitable (1157.911798) time =   3 minute
 
-        //TODO: overall strategy is  profitable (), total time =
+        //TODO: overall strategy is  profitable (696.647), total time = 13 minutes
 
         return portfolio;
     }

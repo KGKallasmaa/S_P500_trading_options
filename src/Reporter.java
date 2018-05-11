@@ -54,8 +54,7 @@ public class Reporter {
         emptyOrderlog(p);
 
 
-        List<String> dates = new ArrayList<>();
-        dates.addAll(date_portfolio_value.keySet());
+        List<String> dates = new ArrayList<>(date_portfolio_value.keySet());
         Collections.sort(dates);
 
 
@@ -95,8 +94,7 @@ public class Reporter {
 
     public void results_to_file(String result_file_name){
 
-        List<String> dates = new ArrayList<>();
-        dates.addAll(date_portfolio_value.keySet());
+        List<String> dates = new ArrayList<>(date_portfolio_value.keySet());
         Collections.sort(dates);
 
 

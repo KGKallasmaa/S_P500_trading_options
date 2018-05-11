@@ -1,6 +1,7 @@
 public class Cash extends Asset{
 
     private double cash_amount;
+    private String oblication_id;
 
     Cash(double amount){
         if (amount > 0){
@@ -14,6 +15,14 @@ public class Cash extends Asset{
     @Override
     public int get_Quantity(){
         return 1;
+    }
+
+
+    public void setOblication_id(String obligation_id){
+        this.oblication_id = obligation_id;
+    }
+    public String getOblication_id(){
+        return oblication_id;
     }
 
 

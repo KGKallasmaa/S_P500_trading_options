@@ -2,10 +2,10 @@ import java.time.LocalDate;
 
 
 public class MAIN {
-    private static Reporter trade(String starting_date, final String ending_date, Portfolio portfolio, Reporter reporter, String order_file_name) throws InterruptedException {
+    private static Reporter trade(String starting_date, final String ending_date, Portfolio portfolio, Reporter reporter, String order_file_name,boolean include_trading_fees) {
 
         int final_time = 0; //last day must also be included
-        Strategy strategy = new Strategy(portfolio, portfolio.getDatabase());
+        Strategy strategy = new Strategy(portfolio, portfolio.getDatabase(),include_trading_fees);
         Long starting_time = System.currentTimeMillis();
 
 
@@ -23,7 +23,7 @@ public class MAIN {
                 portfolio.exercise_dividends(starting_date);
 
                 //2. Do I have any rights or obligations (Options) / Obligations(Stocks)?
-                portfolio.exercise_obligations(starting_date);
+                portfolio.exercise_obligations(starting_date,strategy.isUse_trading_fees());
 
                 //3. Strategy((1.)unemployment rate, (2.) P/E  (3) moving average (4) RSI)
                 strategy.setPortfolio(strategy.trade_all(starting_date));
@@ -31,7 +31,7 @@ public class MAIN {
             }
             //TODO: remove the else part later
             else{
-                portfolio.exercise_obligations(starting_date);
+                portfolio.exercise_obligations(starting_date,strategy.isUse_trading_fees());
                 portfolio.exercise_dividends(starting_date);
             }
             reporter.report(portfolio,starting_date);
@@ -52,12 +52,13 @@ public class MAIN {
 
 
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
         //Initial inputs
         int starting_cash = 1000000;
         Reporter reporter = new Reporter();
+        boolean include_trading_fees = true;
 
-        String base_url = "/Users/Gustav/Documents/GitHub/Thesis(final)/src/Data/"; //change this
+        String base_url = "/Users/Gustav/IdeaProjects/S_P500_trading_optionss/src/Data/"; //change this
 
 
 
@@ -76,7 +77,7 @@ public class MAIN {
 
         //TRADE
 
-        reporter = trade(starting_date,ending_date,portfolio,reporter,base_url+order_file_name);
+        reporter = trade(starting_date,ending_date,portfolio,reporter,base_url+order_file_name,include_trading_fees);
 
 
         /*
