@@ -6,16 +6,18 @@ import java.util.*;
 
 public class Reporter {
 
-    private LinkedHashMap<String,BigDecimal> date_portfolio_value;
+    LinkedHashMap<String,BigDecimal> date_portfolio_value;
+    LinkedHashMap<String,BigDecimal> date_investor_portfolo_value;
     private LinkedHashMap<String,BigDecimal> date_portfolio_value_without_options;
     private LinkedHashMap<String,BigDecimal> date_portfolio_cash_value;
-    private LinkedHashMap<String,BigDecimal> date_neto_coverage;
+     LinkedHashMap<String,Double> date_neto_coverage;
     private LinkedHashMap<String,String> date_content;
     private Queue<Order> orderlog;
 
 
     Reporter(){
         this.date_portfolio_value = new LinkedHashMap<>();
+        this.date_investor_portfolo_value = new LinkedHashMap<>();
         this.date_portfolio_value_without_options = new LinkedHashMap<>();
         this.date_portfolio_cash_value = new LinkedHashMap<>();
         this.date_neto_coverage = new LinkedHashMap<>();
@@ -39,7 +41,10 @@ public class Reporter {
         //5. content of the portfolio
         date_content.put(current_date,p.toString(current_date));
 
-        //6. empty order log <- implemented in the portfolio order_results_to_file
+        //6. Investors portfolio value
+        date_investor_portfolo_value.put(current_date,p.market_value(current_date).add(p.dividend_payments_value(current_date)));
+
+        //7. empty order log <- implemented in the portfolio order_results_to_file
     }
 
     private void emptyOrderlog(Portfolio p){
@@ -50,7 +55,7 @@ public class Reporter {
 
     public void order_results_to_file(String result_file_name, Portfolio p){
 
-        //6. empty order log
+        //7. empty order log
         emptyOrderlog(p);
 
 
@@ -98,34 +103,33 @@ public class Reporter {
         Collections.sort(dates);
 
 
-        PrintWriter pw = null;
+        PrintWriter pw;
         try {
             pw = new PrintWriter(new File(result_file_name));
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("Date"+","+"Portfolio_value"+","+"Portfolio_value_without_options"+","+"Portfolio_cash"+","+"Neto_coverage_ratio");
-        sb.append('\n');
-        if (pw != null) {
-            pw.write(sb.toString());
-        }
-
-        for (String date : dates){
-            sb = new StringBuilder();
-            //TODO
-            sb.append(date).append(",");
-            sb.append(date_portfolio_value.get(date)).append(",");
-            sb.append(date_portfolio_value_without_options.get(date)).append(",");
-            sb.append(date_portfolio_cash_value.get(date)).append(",");
-            sb.append(date_neto_coverage.get(date));
+            StringBuilder sb = new StringBuilder();
+            sb.append("Date"+","+"Portfolio_value"+","+"Portfolio_value_without_options"+","+"Portfolio_cash"+","+"Neto_coverage_ratio"+","+"Investors_portfolio_value");
             sb.append('\n');
-
             pw.write(sb.toString());
 
+            for (String date : dates){
+                sb = new StringBuilder();
+                //TODO
+                sb.append(date).append(",");
+                sb.append(date_portfolio_value.get(date)).append(",");
+                sb.append(date_portfolio_value_without_options.get(date)).append(",");
+                sb.append(date_portfolio_cash_value.get(date)).append(",");
+                sb.append(date_neto_coverage.get(date)).append(",");
+                sb.append(date_investor_portfolo_value.get(date));
+                sb.append('\n');
+                pw.write(sb.toString());
+
+            }
+            pw.close();
+        } catch (FileNotFoundException e) {
+            System.out.println("Error: Error writing values to the file");
         }
-        pw.close();
+
+
 
     }
 

@@ -9,4 +9,6 @@ public abstract class Asset {
     public abstract String get_Name();
 
     public abstract boolean can_be_exercised_today(String today);
+
+    public abstract String getOrder_id();
 }

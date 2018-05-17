@@ -10,6 +10,7 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static java.util.stream.Collectors.averagingDouble;
 import static java.util.stream.Collectors.toList;
 
 public class Portfolio {
@@ -19,17 +20,19 @@ public class Portfolio {
     private Queue<Stock> stock_obligation; // todo: it should be a priority que
     private HashMap<String,List<Cash>> cash_obligation;
     private Queue<Order> order_log;
+    private Queue<Cash> recived_dividends;
     Portfolio(int money, Database db){
         this.port = new ArrayList<>();
 
         if (money >= 0){
-            Cash cash = new Cash(money);
+            Cash cash = new Cash("Initial",money);
             port.add(cash);
         }
         this.database = db;
         this.stock_obligation = new LinkedList<>();
         this.order_log = new LinkedList<>();
         this.cash_obligation = new HashMap<>();
+        this.recived_dividends = new LinkedList<>();
     }
 
 
@@ -45,7 +48,7 @@ public class Portfolio {
                 cash_obligation += cash.get_Asset_Value(current_date);
             }
         }
-
+        cash_obligation = 0; //todo: just for testing
 
 
         return total_market_value.subtract(stock_obligation_exposure).subtract(new BigDecimal(cash_obligation));
@@ -64,17 +67,58 @@ public class Portfolio {
     }
 
     //Helper function
-    private synchronized void add_money(double amount, String current_date){
+    private synchronized void add_money(String order_id, double amount, String current_date){
         double current_cash = get_cash_available(current_date);
         double new_cash = current_cash+amount;
 
-        if (new_cash < 0) {System.out.println("Error: Cash reserves are negative");}
+
+
+        if (new_cash < 0) {
+            System.out.println("Warning("+current_date+"): Cash reserves are negative");
+            //Selling stocks until we have enough funding
+            while (new_cash < 0){
+                //todo: implement lamda
+                List<Stock> stocks = new ArrayList<>();
+                //Add stocks to the stocks list
+                //todo: implement lamda
+                for (Asset a : port){
+                    if (a.getClass().equals(Stock.class)){
+                        stocks.add((Stock)a);
+                    }
+                }
+                if(stocks.isEmpty()){
+                    System.out.println("ERRORRR! Strategy is bankrupted");
+                    break;
+                }
+                double market_price = database.get_stock_value(current_date,"Open");
+                int quantity_to_be_sold = Math.min(stocks.get(0).get_Quantity(),new Double(Math.abs(new_cash)/market_price).intValue() + 1);
+                if (quantity_to_be_sold != 0){
+                    sell_stock(order_id,"SPY",quantity_to_be_sold,market_price,current_date,"Regular",true); //always implementing trading fees
+                    new_cash = get_cash_available(current_date);
+                    stocks.get(0).set_quantity(stocks.get(0).get_Quantity()-quantity_to_be_sold);
+                }
+                else{
+                    sell_stock(order_id,"SPY",stocks.get(0).get_Quantity(),market_price,current_date,"Regular",true); //always implementing trading fees
+                    new_cash = get_cash_available(current_date);
+                    stocks.get(0).set_quantity(0);
+                }
+                //todo: implement lamda
+                List<Stock> to_be_removed = new ArrayList<>();
+                for (Asset a : port){
+                    if (a.getClass().equals(Stock.class)){
+                        to_be_removed.add((Stock)a);
+                    }
+                }
+                port.removeAll(to_be_removed);
+                port.addAll(stocks);
+            }
+        }
 
         //remove old cash
         port.removeAll(port.parallelStream().filter(p->(p.getClass().equals(Cash.class))).collect(toList()));
         //add new cash
         if (new_cash != 0){
-            port.add(new Cash(new_cash));
+            port.add(new Cash(order_id,new_cash));
         }
 
     }
@@ -131,7 +175,7 @@ public class Portfolio {
         if (money_to_be_taken + trading_fee < get_cash_available(current_date)){
             money_to_be_taken = money_to_be_taken+ trading_fee;
 
-            add_money(-money_to_be_taken,current_date);
+            add_money(order_id,-money_to_be_taken,current_date);
             Stock stock = new Stock(order_id,name,database,quantity);
             add_asset(stock);
 
@@ -163,7 +207,7 @@ public class Portfolio {
         double trading_fee = (implement_trading_fee) ? stock_trading_fee(quantity,price) : 0;
         money_to_be_added = money_to_be_added- trading_fee;
 
-        add_money(money_to_be_added,current_date);
+        add_money(order_id,money_to_be_added,current_date);
         Stock stock = new Stock(order_id,name,database,-quantity);
         add_asset(stock);
 
@@ -184,18 +228,18 @@ public class Portfolio {
         double market_price = database.get_stock_value(signing_date,"Open");
         Option option = new Option(order_id,database,type,"Buy",strike_price,signing_date,exercise_date,volatility,market_price,number_of_stocks);
 
-        double trading_fee = (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BS(),"Buy",option.get_Strike()) : 0; //todo: always buying one option at a time
+        double trading_fee = (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BSM(),"Buy",option.get_Strike()) : 0; //todo: always buying one option at a time
 
 
         //Do I have enough money to play the premium?
-        if (get_cash_available(signing_date) + trading_fee >= option.option_premium_BS()*option.get_number_of_Stocks()){
-            double income = -1*(option.option_premium_BS()*number_of_stocks+trading_fee);
-            add_money(income,signing_date);
+        if (get_cash_available(signing_date) + trading_fee >= option.option_premium_BSM()*option.get_number_of_Stocks()){
+            double income = -1*(option.option_premium_BSM()*number_of_stocks+trading_fee);
+            add_money(order_id,income,signing_date);
 
             add_asset(option);
             return trading_fee;
         }
-        System.out.println("Error: not enough money for option premium payment. Money needed ("+(option.option_premium_BS()*option.get_number_of_Stocks())+") is bigger than the sum we have ("+get_cash_available(signing_date)+") ");
+        System.out.println("Error: not enough money for option premium payment. Money needed ("+(option.option_premium_BSM()*option.get_number_of_Stocks())+") is bigger than the sum we have ("+get_cash_available(signing_date)+") ");
         return 0;
 
     }
@@ -203,16 +247,16 @@ public class Portfolio {
         double market_price = database.get_stock_value(signing_date,"Open");
         Option option = new Option(order_id,database,type,"Sell",strike_price,signing_date,exercise_date,volatility,market_price,number_of_stocks);
 
-        double trading_fee = (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BS(),"Sell",option.get_Strike()) : 0; //todo: always buying one option at a time
-        double income = option.option_premium_BS()*option.get_number_of_Stocks()-trading_fee;
+        double trading_fee = (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BSM(),"Sell",option.get_Strike()) : 0; //todo: always buying one option at a time
+        double income = option.option_premium_BSM()*option.get_number_of_Stocks()-trading_fee;
 
-        add_money(income,signing_date);
+        add_money(order_id,income,signing_date);
 
         add_asset(option);
         return trading_fee;
 
     }
-    private void exercise_option(Option option, String today,boolean implement_trading_fee) {
+    private void exercise_option(String order_id,Option option, String today,boolean implement_trading_fee) {
 
 
         double current_market_price = database.get_stock_value(today, "Open");
@@ -245,14 +289,14 @@ public class Portfolio {
                 expense = -expense;
             }
         }
-        trading_fee += (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BS(),"Buy",option.get_Strike()) : 0;
-        trading_fee += (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BS(),"Sell",current_market_price) : 0;
+        trading_fee += (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BSM(),"Buy",option.get_Strike()) : 0;
+        trading_fee += (implement_trading_fee) ? option_trading_fee(1,option.option_premium_BSM(),"Sell",current_market_price) : 0;
 
 
         double net_income = income-expense-trading_fee;
         if (net_income != 0){
             change_order_profit(option.getOrder_id(),"Option",net_income);
-            add_money(net_income, today);
+            add_money(order_id,net_income, today);
         }
 
     }
@@ -293,13 +337,13 @@ public class Portfolio {
         String end_date = LocalDate.parse(current_date).plusDays(90).toString(); //todo: implement general solution
         double interest_payment = (!options_that_can_be_exercised.isEmpty()) ? interest_payment(current_date,end_date,options_that_can_be_exercised,"Regular") : 0;
 
-        options_that_can_be_exercised.forEach(o->exercise_option((Option)o,current_date,implement_trading_fee));
+        options_that_can_be_exercised.forEach(o->exercise_option(o.getOrder_id(),(Option)o,current_date,implement_trading_fee));
         port.removeAll(options_that_can_be_exercised);
 
 
         if (interest_payment != 0){
             //subtract interest payment
-            add_money(-interest_payment,current_date);
+            add_money(options_that_can_be_exercised.get(0).getOrder_id(),-interest_payment,current_date);
             String order_id_1 = UUID.randomUUID().toString();
             Order order  = new Order(order_id_1,current_date,"Interest","Pay","RSI","Interest payment",1,-interest_payment);
             add_order(order);
@@ -320,7 +364,7 @@ public class Portfolio {
             List<Cash> intress_obligations = cash_obligation.get(current_date);
 
             intress_obligations.forEach(payment-> {
-                add_money(-payment.get_Asset_Value(current_date),current_date);
+                add_money(payment.getOrder_id(),-payment.get_Asset_Value(current_date),current_date);
                 change_order_profit(payment.getOblication_id(),"Stock",-payment.get_Asset_Value(current_date));
                 });
             cash_obligation.remove(current_date);
@@ -342,10 +386,10 @@ public class Portfolio {
 
            if (net_dividends != 0){
                String order_id_1 = UUID.randomUUID().toString();
-               Order order  = new Order(order_id_1,today,"Dividend","Pay","-","Pay dividends",1,net_dividends);
+               Order order  = new Order(order_id_1,today,"Dividend","Pay","-","Pay dividends to other parties",1,net_dividends);
                add_order(order);
                //Add money
-               add_money(net_dividends,today);
+               add_money(order_id_1,net_dividends,today);
                //Log
                String signal_text =today+": Net dividends received: "+net_dividends;
                database.record_signal(signal_text);
@@ -359,9 +403,18 @@ public class Portfolio {
         double current_market_price = database.get_stock_value(current_date,"Open");
         double current_cash = get_cash_available(current_date);
         double stock_obligations_value = stock_obligation.stream().filter(obligation->obligation.getObligation_type().equals("Buy")).mapToDouble(obligation->obligation.get_Quantity()*current_market_price).sum();
+        double interest_obligations_value = 0;
+        //todo: implement lamda
+        for (String date : cash_obligation.keySet()){
+            List<Cash> all_oblicaions_for_the_day = cash_obligation.get(date);
+            interest_obligations_value += all_oblicaions_for_the_day.stream().mapToDouble(cash->cash.get_Asset_Value(date)).sum();
+        }
         double option_exposure = getOptions().stream().mapToDouble(option->option.get_Asset_Value(current_date)).sum();
 
-        double current_free_cash = current_cash-stock_obligations_value+option_exposure;
+
+
+
+        double current_free_cash = current_cash-stock_obligations_value+option_exposure-interest_obligations_value;
 
         return new BigDecimal(Math.max(0,current_free_cash));
     }
@@ -383,10 +436,11 @@ public class Portfolio {
        return  "cash:"+cash_amount/1000000+" stock: "+stock_value/1000000+ " option: "+option_value/1000000+" market: "+market_value(current_date).divide(new BigDecimal(1000000));
     }
 
-    public BigDecimal neto_coverage_ratio(String current_date) {
-        BigDecimal free_money = free_money(current_date);
-        BigDecimal cash = new BigDecimal(get_cash_available(current_date));
-        return free_money.divide(cash,RoundingMode.HALF_DOWN);
+    public double neto_coverage_ratio(String current_date) {
+       double negative_option_exposure = getOptions().stream().filter(p->p.get_Asset_Value(current_date) < 0).mapToDouble(option->option.get_Asset_Value(current_date)).sum();
+        double cash = get_cash_available(current_date);
+        double free_money = cash+negative_option_exposure;
+        return free_money/cash;
     }
 
     public void add_order(Order order) {
@@ -471,6 +525,8 @@ public class Portfolio {
 
             double annuity_payment = loan_amount / (var1*var2);
 
+            if (annuity_payment != 0) System.out.println("hi");
+
             return annuity_payment-loan_amount;
 
 
@@ -524,7 +580,7 @@ public class Portfolio {
         return premium_fee+exchange_fee+regulatory_fee+transaction_fee+occ_fee;
     }
     public void add_interest_obligation(String order_id, String obligation_date, double amount) {
-        Cash cash = new Cash(amount);
+        Cash cash = new Cash(order_id,amount);
         cash.setOblication_id(order_id);
         List<Cash> all_obligations_on_the_date = new ArrayList<>();
         all_obligations_on_the_date.add(cash);
@@ -534,5 +590,37 @@ public class Portfolio {
         }
         cash_obligation.put(obligation_date,all_obligations_on_the_date);
 
+    }
+
+    public void pay_dividends(String today) {
+        //1. Is the current portfolio value positive?
+        BigDecimal current_market_value = market_value(today);
+        if (current_market_value.compareTo(BigDecimal.ZERO) > 0){
+            //2. Is the current portfolio value bigger than a year ago?
+            BigDecimal market_value_one_year_ago = market_value(LocalDate.parse(today).plusYears(-1).toString());
+            if (current_market_value.doubleValue() > market_value_one_year_ago.doubleValue()){
+                //3. Pay 25% of the free money as dividends
+                double dividend_amount = Math.min((free_money(today).doubleValue() > 0) ? (free_money(today).doubleValue() * 0.25) : 0,get_cash_available(today));
+                //4. Add dividend payments to my account
+                if (dividend_amount > 0){
+                    double cash_start = get_cash_available(today);
+                    String order_id = UUID.randomUUID().toString();
+                    Cash cash = new Cash(order_id,dividend_amount);
+                    recived_dividends.add(cash);
+                    //Record order
+                    Order order  = new Order(order_id,today,"Dividend","Pay","-","Pay dividends to investors",1,0);
+                    add_order(order);
+                    add_money(order_id,-dividend_amount,today);
+                    double cash_end = get_cash_available(today);
+                    double neli = 5;
+                }
+            }
+        }
+    }
+
+    //helper funcion
+    public BigDecimal dividend_payments_value(String current_date) {
+        double value = recived_dividends.stream().mapToDouble(p->p.get_Asset_Value(current_date)).sum();
+        return new BigDecimal(value);
     }
 }

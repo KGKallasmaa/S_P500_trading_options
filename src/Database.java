@@ -269,6 +269,19 @@ public class Database {
         current_date = LocalDate.parse(current_date).plusDays(-1).toString();
         return get_pe_value(current_date);
     }
+
+    public double get_last_dividend_value(String current_date) {
+        //used in  BSM option pricing
+        if (dividend_data.containsKey(current_date)){
+            return dividend_data.get(current_date);
+        }
+
+        current_date = LocalDate.parse(current_date).plusDays(-1).toString();
+        return get_last_dividend_value(current_date);
+    }
+
+
+
     public double get_unemployment_value(String current_date) {
         if (unemployment_data.containsKey(current_date)){
             return unemployment_data.get(current_date);

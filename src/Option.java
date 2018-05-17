@@ -1,6 +1,9 @@
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.DecimalFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.util.Date;
 
 
@@ -78,7 +81,7 @@ public class Option extends Asset {
         return Double.parseDouble(null);
 
     }
-    private double CND(double X) {
+    private static double CND(double X) {
         //SOURCE: https://github.com/bret-blackford/black-scholes/blob/master/OptionValuation/src/mBret/options/Black_76.java
         double L, K, w;
         double a1 = 0.31938153, a2 = -0.356563782, a3 = 1.781477937, a4 = -1.821255978, a5 = 1.330274429;
@@ -176,29 +179,76 @@ public class Option extends Asset {
         return 1;
     }
 
-    public double option_premium_BS() {
-        //SOURCE: https://github.com/bret-blackford/black-scholes/blob/master/OptionValuation/src/mBret/options/Black_76.java
+    public double option_premium_BSM() {
+        /*
+        Sources:
+        1. Theory(page 19): https://www.bostonfed.org/-/media/Documents/neer/neer296b.pdf
+        2. Implementation: http://www.macroption.com/black-scholes-formula/
+         */
 
-        //Black-Scholes formula
+        //Black-Scholes-Merton formula
 
-        double d1 = (Math.log(this.signing_price / this.strike_price) + (this.risk_free_rate + this.volatility * this.volatility / 2) * date_dif()) / (this.volatility * Math.sqrt(date_dif()));
-        double d2 = d1 - this.volatility * Math.sqrt(date_dif());
 
-        DecimalFormat df = new DecimalFormat("#.0000");
+        /*
+        Input values
+         */
+        //1. Market price = S0
+        double market_price = database.get_stock_value(signing_date,"Open");
+        //2. Continuously compounded dividend yield = (last dividend payment*4) / market_price
+        double q = 0;
+        int i = 0;
+        String start_div_date = LocalDate.parse(signing_date).plusDays(-365).toString();
+        while (i< 4){
+            q += database.get_last_dividend_value(start_div_date);
+            i++;
+            start_div_date = LocalDate.parse(start_div_date).plusDays(91).toString();
+        }
+
+        q = q/market_price;
+
+        //3. time to expiration % of a year
+        double t = date_dif()/365.0;
+        //4. continuously compounded risk-free interest rate (annual)
+        double r = risk_free_rate;
+        //5. volatility
+        double sigma = volatility/100.0; //todo: (very important!)
+        //6. d1
+        double d1 = (Math.log(market_price/strike_price)+t*(r-q+Math.pow(sigma,2)))/(sigma*Math.sqrt(t));
+        //7. d2
+        double d2 = d1-Math.sqrt(t);
+
+
 
         switch (this.type) {
             case "Call":
                 //Rounding value to 3 decimal places
-                return Double.valueOf(df.format(this.signing_price * CND(d1) - this.strike_price * Math.exp(-this.risk_free_rate * date_dif()/365) * CND(d2)));
+                double premium =  round(market_price*Math.exp(-q*t)*CND(d1)- strike_price*Math.exp(-r*t)*CND(d2),3);
+               // System.out.println("Market price: "+market_price+" Strike price: "+strike_price+" Premium: "+premium);
+                return premium;
+
             case "Put":
                 //Rounding value to 3 decimal places
-               return Double.valueOf(df.format(this.strike_price * Math.exp(-this.risk_free_rate * date_dif()/365) * CND(-d2) - this.signing_price * CND(-d1)));
+                premium =  round(strike_price*Math.exp(-r*t)*CND(-d2)-market_price*Math.exp(-q*t)*CND(-d1),3);
+              // System.out.println("Market price: "+market_price+" Strike price: "+strike_price+" Premium: "+premium);
+                return premium;
+
+
             default:
                 System.out.println("Error calculation option premium");
                 return 0;
         }
 
     }
+    //helper funcion
+    public static double round(double value, int places) {
+        if (places < 0) throw new IllegalArgumentException();
+
+        BigDecimal bd = new BigDecimal(value);
+        bd = bd.setScale(places, RoundingMode.HALF_UP);
+        return bd.doubleValue();
+    }
+
+
 
     public String getOrder_id(){
         return order_id;

@@ -59,6 +59,7 @@ public class Stock extends Asset {
     public String getOrder_id(){
         return order_id;
     }
+    public void set_quantity (int new_quantity){ this.quantity = new_quantity;}
 
 
 
