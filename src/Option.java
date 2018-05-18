@@ -185,10 +185,7 @@ public class Option extends Asset {
         1. Theory(page 19): https://www.bostonfed.org/-/media/Documents/neer/neer296b.pdf
         2. Implementation: http://www.macroption.com/black-scholes-formula/
          */
-
         //Black-Scholes-Merton formula
-
-
         /*
         Input values
          */
@@ -211,13 +208,24 @@ public class Option extends Asset {
         //4. continuously compounded risk-free interest rate (annual)
         double r = risk_free_rate;
         //5. volatility
-        double sigma = volatility/100.0; //todo: (very important!)
+        double sigma = 0;
+        //Should we implement VIX?
+        if (!is_before(signing_date,"1990-01-02")){
+            //implementing vix
+            String date = signing_date;
+            double vix = database.get_vix_value(signing_date);
+
+            sigma = vix/100.0;
+        }
+        else{
+            //using regular value
+            sigma = volatility/100.0; //todo: (very important!)
+        }
+
         //6. d1
         double d1 = (Math.log(market_price/strike_price)+t*(r-q+Math.pow(sigma,2)))/(sigma*Math.sqrt(t));
         //7. d2
         double d2 = d1-Math.sqrt(t);
-
-
 
         switch (this.type) {
             case "Call":

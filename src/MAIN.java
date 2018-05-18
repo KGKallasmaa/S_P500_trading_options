@@ -69,15 +69,18 @@ public class MAIN {
         boolean pay_dividends = true;
         String base_url = "/Users/Gustav/IdeaProjects/S_P500_trading_optionss/src/Data/"; //change this
         //File system
-        String[] files = {base_url+"10_year_treasury_rate.csv",base_url+"pe_data.csv",base_url+"trading_signals_log",base_url+"unemployment_data.csv",base_url+"stock_data.csv",base_url+"order_log",
+        String[] files = {base_url+"^VIX.csv",base_url+"10_year_treasury_rate.csv",base_url+"pe_data.csv",base_url+"trading_signals_log",base_url+"unemployment_data.csv",base_url+"stock_data.csv",base_url+"order_log",
                 base_url+"div_data.csv",base_url+"inflation_data.csv"};
 
 
-        Database db = new Database(files[0],files[2],files[1],files[3],files[4],files[5],files[6],files[7]);
-        String starting_date = "1954-03-23";
-       // String starting_date = "1953-12-03";
-        String ending_date = "2018-03-23";
-      // String ending_date = "2018-03-23";
+        Database db = new Database(files[0],files[1],files[3],files[2],files[4],files[5],files[6],files[7],files[8]);
+
+
+
+         //   String starting_date = "2014-03-24";
+        String starting_date = "1999-03-24";
+       // String ending_date = "2014-03-24";
+       String ending_date = "2014-03-23";
         Portfolio portfolio = new Portfolio(starting_cash,db);
 
         /*
@@ -110,7 +113,7 @@ public class MAIN {
         }
          */
         for (String d : reporter.date_portfolio_value.keySet()){
-            System.out.println(reporter.date_portfolio_value.get(d).divide(new BigDecimal(1000000)));
+            System.out.println(reporter.date_portfolio_value.get(d));
         }
 
 

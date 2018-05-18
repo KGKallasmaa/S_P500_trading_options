@@ -18,6 +18,7 @@ public class Database {
     private HashMap<String,Double> low_data; //(date,value) RSI
     private HashMap<String,Double> unemployment_data; //(date,value)
     private LinkedHashMap<String,Double> stock_data; //(date,value)
+    private LinkedHashMap<String,Double> vix_data; //(date,value)
     private LinkedHashMap<String,Double> pe_data; //(date,value)
     private LinkedHashMap<String,Double> treasury_data; //(date,value)
     private LinkedHashMap<String,Double> inflation_data; //(date,value)
@@ -27,11 +28,38 @@ public class Database {
     private final String signal_file_name;
     private final HashMap<String,String> order_id_action;
 
-    Database(String treasury_rate_file_name,String signal_file_name,String pe_file_name,String unemployment_file_name,String stock_file_name,String log_file_name,String div_file_name,String inflation_file_name){
+    Database(String vix_file_name,String treasury_rate_file_name,String signal_file_name,String pe_file_name,String unemployment_file_name,String stock_file_name,String log_file_name,String div_file_name,String inflation_file_name){
         this.log_file_name = log_file_name;
         this.signal_file_name = signal_file_name;
         this.trading_time = new ArrayList<>();
         this.order_id_action = new HashMap<>();
+
+
+
+        if (Files.exists(Paths.get(vix_file_name))) {
+            this.vix_data = new LinkedHashMap<>();
+            try {
+                Scanner scanner = new Scanner(new File(vix_file_name));
+                scanner.nextLine();
+               while (scanner.hasNext()) {
+                    String line = scanner.nextLine();
+
+                    List<String> line_list = new ArrayList<>(Arrays.asList(line.split(",")));
+
+                    //Data is already propery formated
+
+                    this.vix_data.put(line_list.get(0), Double.parseDouble(line_list.get(1)));
+
+                }
+                scanner.close();
+            } catch (FileNotFoundException e) {
+                System.out.println("VIX file was not found");
+            }
+        }
+
+
+
+
 
 
         if (Files.exists(Paths.get(stock_file_name))) {
@@ -60,7 +88,6 @@ public class Database {
                     } catch (ParseException e) {
                         System.out.println("Error: String ("+sb+") couldn' be converted to date");
                     }
-
 
                     this.stock_data.put(sb, Double.parseDouble(line_list.get(1)));
                     this.high_data.put(sb, Double.parseDouble(line_list.get(2)));
@@ -269,6 +296,17 @@ public class Database {
         current_date = LocalDate.parse(current_date).plusDays(-1).toString();
         return get_pe_value(current_date);
     }
+    public double get_vix_value(String current_date) {
+        if (vix_data.containsKey(current_date)){
+            return vix_data.get(current_date);
+        }
+        //If we have data for 01-01-1950 and 01-02-1950, then data for 02-02-1950 is the same as for 01-01-2950
+        current_date = LocalDate.parse(current_date).plusDays(-1).toString();
+        return get_vix_value(current_date);
+    }
+
+
+
 
     public double get_last_dividend_value(String current_date) {
         //used in  BSM option pricing
